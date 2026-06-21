@@ -22,10 +22,10 @@ fetch:
       email: myemail@example.com
       password: password
   royalroad:
-    url: "https://..."
+    url: "https://www.royalroad.com/fiction/63759/super-supportive"
     cache_refresh: false
   timeline:
-    url: "my_url"
+    url: "https://terrestrialbiped.github.io/Super-Supportive-Timeline/patreon-latest.html"
 
 plot:
   timeline:

@@ -30,7 +30,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
-import yaml
 
 from chaplib.config import Config
 
