@@ -1,30 +1,28 @@
 from chaplib import fetch, data
+from chaplib.config import Config
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime
 import pytz
 import re
 import pandas as pd
 import argparse
-import yaml
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str, default="config.yaml")
-    parser.add_argument('--initial-path', type=str, default="data/patreon/initial.csv")
-    parser.add_argument('--deadlines-path', type=str, default="data/patreon/deadlines.csv")
-    parser.add_argument('--lock-path', type=str, default="data/patreon/lock")
-    return parser.parse_args()
-
-def load_config(config_path):
-    with open(config_path) as f:
-        config = yaml.safe_load(f)
-    settings = config['email_settings']
-    return (
-        settings['imap_server'],
-        settings['imap_port'],
-        settings['email'],
-        settings['password']
+    parser.add_argument(
+        "--config", default="config.yaml", metavar="FILE",
+        help="YAML config file (default: config.yaml)",
     )
+    pre, _ = parser.parse_known_args()
+    cfg = Config.load(pre.config)
+    parser.add_argument('--chapters-csv', type=str, default=cfg.get("path.patreon.chapters_csv"))
+    parser.add_argument('--deadlines-csv', type=str, default=cfg.get("path.patreon.deadlines_csv"))
+    parser.add_argument('--lock-path', type=str, default=cfg.get("path.patreon.lock"))
+    parser.add_argument('--imap-server', type=str, default=cfg.get("fetch.patreon.email_settings.imap_server"))
+    parser.add_argument('--imap-port', type=int, default=cfg.get("fetch.patreon.email_settings.imap_port"))
+    parser.add_argument('--imap-email', type=str, default=cfg.get("fetch.patreon.email_settings.email"))
+    parser.add_argument('--imap-password', type=str, default=cfg.get("fetch.patreon.email_settings.password"))
+    return parser.parse_args()
 
 def soup_to_id(soup):
     arr = soup.select('a[href*="post_id="]')
@@ -116,9 +114,9 @@ def soup_to_modifier(soup):
 def main():
     # setup
     args = parse_args()
-    imap_server, imap_port, email, password = load_config(args.config)
+
     locker = fetch.ChapterLock(args.lock_path)
-    fetcher = fetch.PatreonEmailFetch(imap_server, imap_port, email, password)
+    fetcher = fetch.PatreonEmailFetch(args.imap_server, args.imap_port, args.imap_email, args.imap_password)
 
     # apply function to soup
     fetcher.apply_function_map({
@@ -142,16 +140,16 @@ def main():
 
     pd.set_option('display.max_columns', None)
     # merge with original files
-    df_updated_initial = data.merge_initial(
-        data.load(args.initial_path),
+    df_updated_chapters = data.merge_initial(
+        data.load(args.chapters_csv),
         df
     )
-    data.save(df_updated_initial, args.initial_path)
+    data.save(df_updated_chapters, args.chapters_csv)
     df_updated_deadlines = data.merge_deadlines(
-        data.load(args.deadlines_path),
+        data.load(args.deadlines_csv),
         df
     )
-    data.save(df_updated_deadlines, args.deadlines_path)
+    data.save(df_updated_deadlines, args.deadlines_csv)
 
 if __name__ == "__main__":
     main()

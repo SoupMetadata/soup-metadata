@@ -5,16 +5,25 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
+from chaplib.config import Config
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Plot word count statistics from a RoyalRoad CSV.")
-    parser.add_argument("--initial-csv", default="data/royalroad/initial.csv",
-                        help="Path to the initial CSV.")
+    parser.add_argument(
+        "--config", default="config.yaml", metavar="FILE",
+        help="YAML config file (default: config.yaml)",
+    )
+    pre, _ = parser.parse_known_args()
+    cfg = Config.load(pre.config)
+    
+    parser.add_argument("--chapters-csv", default=cfg.get("path.royalroad.chapters_csv"),
+                        help="Path to the chapters CSV.")
     parser.add_argument("-p", "--plot", action="store_true", default=False,
                         help="Show plot interactively after saving.")
-    parser.add_argument("--out", default="plots/rr_word_count.png",
-                        help="Output path for the plot (default: plots/rr_word_count.png).")
-    parser.add_argument("--day-rolling-avg", default=26, type=int,
+    parser.add_argument("--out", default=cfg.get("plot.royalroad.out"),
+                        help="Output path for the plot.")
+    parser.add_argument("--day-rolling-avg", default=cfg.get("plot.royalroad.day_rolling_avg"), type=int,
                         help="Window size in days for the rolling word count average.")
     return parser.parse_args()
 
@@ -29,10 +38,15 @@ def poly_fit_r2(x: np.ndarray, y: np.ndarray, deg: int) -> tuple[np.ndarray, np.
 
 
 def build_word_avg(df: pd.DataFrame, day_rolling: int) -> pd.DataFrame:
-    df_chapexists = df[~df["chapter"].isna()]
+    df_chapexists = df[~df["chapter"].isna()].copy()
+    df_chapexists["published"] = pd.to_datetime(
+        df_chapexists["published"], utc=True, errors="coerce"
+    )
+    df_chapexists = df_chapexists.dropna(subset=["published"])
     df_wc = (
         df_chapexists
         .set_index("published")[["word_count", "chapter"]]
+        .sort_index()
         .resample("1h")
         .sum()
         .fillna(0)
@@ -101,7 +115,7 @@ def plot_word_count_by_chapter(ax, df: pd.DataFrame) -> None:
 def main() -> None:
     args = parse_args()
 
-    df = pd.read_csv(args.initial_csv, parse_dates=["published"])
+    df = pd.read_csv(args.chapters_csv, parse_dates=["published"])
     df_wc = build_word_avg(df, args.day_rolling_avg)
 
     fig, axes = plt.subplots(2, 1, figsize=(12, 9))

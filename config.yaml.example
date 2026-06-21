@@ -1,9 +1,0 @@
-email_settings:
-  imap_server: 127.0.0.1
-  imap_port: 1143
-  email: myemail@example.com
-  password: password
-royalroad_fetch:
-  url: https://www.royalroad.com/fiction/63759/super-supportive
-
-

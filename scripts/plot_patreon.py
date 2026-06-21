@@ -4,27 +4,35 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from chaplib.config import Config
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Plot Patreon chapter statistics.")
+    parser.add_argument(
+        "--config", default="config.yaml", metavar="FILE",
+        help="YAML config file (default: config.yaml)",
+    )
+    pre, _ = parser.parse_known_args()
+    cfg = Config.load(pre.config)
+
     parser.add_argument("-p", "--plot", action="store_true", 
                         help="Show plots interactively after saving.")
-    parser.add_argument("--events-csv", default="data/patreon/events.csv",
-                        help="Path to events CSV (default: data/patreon/events.csv).")
-    parser.add_argument("--intermediary-csv", default="data/temp/intermediary.csv",
-                        help="Path to intermediary CSV (default: data/temp/intermediary.csv).")
-    parser.add_argument("--out-histograms", default="plots/histograms.png",
+    parser.add_argument("--events-csv", default=cfg.get("path.patreon.events_csv"),
+                        help="Path to events CSV.")
+    parser.add_argument("--intermediary-csv", default=cfg.get("path.intermediary"),
+                        help="Path to intermediary CSV.")
+    parser.add_argument("--out-histograms", default=cfg.get("plot.patreon.out_histograms"),
                         help="Output path for histograms plot.")
-    parser.add_argument("--out-hours-late", default="plots/hours_late.png",
+    parser.add_argument("--out-hours-late", default=cfg.get("plot.patreon.out_hours_late"),
                         help="Output path for hours-late scatter plot.")
-    parser.add_argument("--out-word-count", default="plots/word_count.png",
+    parser.add_argument("--out-word-count", default=cfg.get("plot.patreon.out_word_count"),
                         help="Output path for word-count plot.")
-    parser.add_argument("--out-monthly-bars", default="plots/monthly_bars.png",
+    parser.add_argument("--out-monthly-bars", default=cfg.get("plot.patreon.out_monthly_bars"),
                         help="Output path for monthly word count and chapter count bar plot.")
-    parser.add_argument("--day-rolling-avg", default=26, type=int,
-                        help="Window size in days for the rolling words/day average (default: 26).")
-    parser.add_argument("--exclude-gaps", action="store_true", default=False,
+    parser.add_argument("--day-rolling-avg", default=cfg.get("plot.patreon.day_rolling_avg"), type=int,
+                        help="Window size in days for the rolling words/day average.")
+    parser.add_argument("--exclude-gaps", action="store_true", default=cfg.get("plot.patreon.exclude_gaps"),
                         help="Exclude hiatus gaps from the word avg plot.")
     return parser.parse_args()
 

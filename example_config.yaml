@@ -1,0 +1,46 @@
+path:
+  patreon:
+    chapters_csv: data/patreon/chapters.csv
+    deadlines_csv: data/patreon/deadlines.csv
+    events_csv: data/patreon/events.csv
+    lock: data/patreon/lock
+  royalroad:
+    cache: data/royalroad/cache
+    chapters_csv: data/royalroad/chapters.csv
+    lock: data/royalroad/lock
+  timeline:
+    latest_pdf: data/patreon/latest.pdf
+    csv: data/patreon/timeline.csv
+  intermediary:
+    path: data/temp/intermediary.csv
+
+fetch:
+  patreon:
+    email_settings:
+      imap_server: 127.0.0.1
+      imap_port: 1143
+      email: myemail@example.com
+      password: password
+  royalroad:
+    url: "https://..."
+    cache_refresh: false
+  timeline:
+    url: "my_url"
+
+plot:
+  timeline:
+    window: 10
+    pacing_window: 10
+    output: plots/timeline.png
+  patreon:
+    out_histograms: plots/histograms.png
+    out_hours_late: plots/hours_late.png
+    out_word_count: plots/word_count.png
+    out_monthly_bars: plots/monthly_bars.png
+    day_rolling_avg: 26
+    exclude_gaps: false
+  royalroad:
+    out: plots/rr_word_count.png
+    day_rolling_avg: 26
+
+
