@@ -45,7 +45,9 @@ Copy over your config to `config.yaml` for the scripts to run correctly.
 Simply run `scripts/run.sh` for a full update.
 
 ### Patreon
-Run `scripts/update_patreon.py` to update the patreon data. This pulls from an email provider to parse patreon email notifications (see [config](#Config) on how to set this up, this has been successfully tested with a local email server mirroring remote from protonmail-bridge). For command line arguments, run `scripts/update_patreon.py --help`
+Run `scripts/update_patreon.py` to update the patreon data. This pulls from an email provider to parse patreon email notifications (see [config](#Config) on how to set this up, this has been successfully tested with a local email server mirroring remote from protonmail-bridge). Note that the email processing and whatnot is done locally, nothing is sent anywhere. For details, look in the `PatreonEmailFetch` in `chaplib/fetch.py`.
+
+For command line arguments, run `scripts/update_patreon.py --help`
 
 Unfortunately I don't think that the Patreon API supports getting data from other creators, so parsing email is one of the only solutions.
 ### Royalroad
