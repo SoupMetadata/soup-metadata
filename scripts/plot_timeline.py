@@ -28,8 +28,10 @@ import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
+from scipy.optimize import curve_fit
 
 from chaplib.config import Config
 
@@ -37,6 +39,10 @@ from chaplib.config import Config
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
+
+def _logistic(x, L, k, x0, b):
+    """Logistic curve: L / (1 + exp(-k(x - x0))) + b."""
+    return L / (1.0 + np.exp(-k * (x - x0))) + b
 
 def filter_monotonic_chapters(df: pd.DataFrame, max_jump: int = 29) -> pd.DataFrame:
     """Drop rows where chapter number jumps by more than *max_jump* (likely noise)."""
@@ -117,6 +123,38 @@ def plot_story_vs_irl(
         _, ax = plt.subplots(figsize=(12, 5))
 
     sns.lineplot(data=merged, x="story_date", y="published", ax=ax)
+
+    # Fit a logistic curve to IRL publish date vs in-story date.
+    x = (merged["story_date"] - merged["story_date"].min()).dt.total_seconds().to_numpy() / 86400
+    y = (merged["published"] - merged["published"].min()).dt.total_seconds().to_numpy() / 86400
+
+    if len(x) >= 4:
+        # Reasonable initial guesses from the data spread.
+        p0 = [
+            max(y.max() - y.min(), 1.0),       # L
+            1.0 / max(x.std(), 1.0),           # k
+            float(np.median(x)),               # x0
+            float(y.min()),                    # b
+        ]
+        try:
+            popt, _ = curve_fit(_logistic, x, y, p0=p0, maxfev=20000)
+            y_fit = _logistic(x, *popt)
+
+            ss_res = np.sum((y - y_fit) ** 2)
+            ss_tot = np.sum((y - y.mean()) ** 2)
+            r2 = 1.0 - ss_res / ss_tot if ss_tot != 0 else float("nan")
+
+            # Map fitted IRL-day offsets back to datetimes for plotting.
+            fit_dates = merged["published"].min() + pd.to_timedelta(y_fit, unit="D")
+            ax.plot(
+                merged["story_date"], fit_dates,
+                color="red", linestyle="--", linewidth=1.5,
+                label=f"Logistic fit (R² = {r2:.3f})",
+            )
+            ax.legend()
+        except RuntimeError:
+            print("Warning: logistic fit did not converge; skipping overlay.")
+
     ax.set_title("IRL Publish Date vs. In-Story Date")
     ax.set_xlabel("In-Story Date")
     ax.set_ylabel("IRL Publish Date")
