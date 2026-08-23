@@ -1,4 +1,5 @@
 import argparse
+import re
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -30,6 +31,18 @@ def parse_args():
                         help="Output path for word-count plot.")
     parser.add_argument("--out-monthly-bars", default=cfg.get("plot.patreon.out_monthly_bars"),
                         help="Output path for monthly word count and chapter count bar plot.")
+    parser.add_argument("--out-deadline-gap", default=cfg.get("plot.patreon.out_deadline_gap"),
+                        help="Output path for deadline-gap vs hours-late scatter plot.")
+    try:
+        default_out_arcs = cfg.get("plot.patreon.out_arcs")
+    except KeyError:
+        default_out_arcs = None
+    parser.add_argument("--out-arcs", default=default_out_arcs or "patreon_arcs.png",
+                        help="Output path for the arc length/frequency/gap plot.")
+    parser.add_argument("--deadline-max-gap-days", default=cfg.get("plot.patreon.deadline_max_gap_days"), type=float,
+                        help="Exclude deadline gaps larger than this many days (hiatuses).")
+    parser.add_argument("--deadline-last-n", default=cfg.get("plot.patreon.deadline_last_n"), type=int,
+                        help="Only consider the most recent N entries for the deadline-gap plot.")
     parser.add_argument("--day-rolling-avg", default=cfg.get("plot.patreon.day_rolling_avg"), type=int,
                         help="Window size in days for the rolling words/day average.")
     parser.add_argument("--exclude-gaps", action="store_true", default=cfg.get("plot.patreon.exclude_gaps"),
@@ -275,6 +288,401 @@ def plot_monthly_bars(df: pd.DataFrame, out_path: str, show: bool = False) -> No
         plt.close(fig)
 
 
+ROMAN_PART_RE = re.compile(
+    r"^(?=[MDCLXVI]+$)M{0,4}(?:CM|CD|D?C{0,3})"
+    r"(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})$",
+    flags=re.IGNORECASE,
+)
+
+NUMBER_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+    "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+    "nineteen": 19, "twenty": 20,
+}
+
+
+def _roman_to_int(roman: str) -> int:
+    """Convert a validated Roman numeral to an integer."""
+    values = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
+    total = 0
+    previous = 0
+    for symbol in reversed(roman.upper()):
+        value = values[symbol]
+        total += -value if value < previous else value
+        previous = max(previous, value)
+    return total
+
+
+def _parse_arc_title(title: str) -> tuple[str, int | None, str | None]:
+    """Return (clean arc name, part number, suffix style).
+
+    The title prefix before the first colon is the spelled-out chapter number,
+    not part of the arc name. Part suffixes may be Roman numerals, Arabic digits,
+    or case-insensitive number words. An unnumbered title returns no part; it may
+    later be inferred as part I when immediately followed by part II.
+    """
+    title = title.strip()
+    if ":" in title:
+        title = title.split(":", maxsplit=1)[1].strip()
+
+    if " " not in title:
+        return title, None, None
+
+    arc_name, label = title.rsplit(maxsplit=1)
+    if label.isdigit():
+        return arc_name.strip(), int(label), "arabic"
+    if label.casefold() in NUMBER_WORDS:
+        return arc_name.strip(), NUMBER_WORDS[label.casefold()], "word"
+    if ROMAN_PART_RE.fullmatch(label):
+        return arc_name.strip(), _roman_to_int(label), "roman"
+    return title, None, None
+
+
+def _chapters_are_consecutive(first: float, second: float) -> bool:
+    """Return whether two float chapter numbers are one chapter apart."""
+    return bool(np.isclose(float(second) - float(first), 1.0))
+
+
+def build_arc_stats(df: pd.DataFrame) -> pd.DataFrame:
+    """Extract numbered title arcs and their lengths/gaps in chapter order.
+
+    Chapter names come from ``title`` and their numeric chronological positions
+    come from ``chapter``. An arc is a consecutive run of chapters whose ending
+    labels count upward from 1 through N. Roman numerals, Arabic digits, and
+    number words may be mixed freely, and title-name differences are ignored.
+    An unnumbered chapter immediately before part 2 is inferred to be part 1.
+    Within a run, up to two consecutive unlabeled chapters may bridge numbered
+    parts; each may represent one missing part or a two-part combined chapter.
+    A combined chapter may also cause the next stored chapter number to jump by
+    two, so bridges compare the total chapter-number span with the part span.
+    The cleaned name from part N becomes the arc name.
+    """
+    required_columns = {"title", "chapter"}
+    missing_columns = required_columns.difference(df.columns)
+    if missing_columns:
+        missing = ", ".join(sorted(missing_columns))
+        raise ValueError(f"Arc plotting requires the following columns: {missing}")
+
+    chapters = (
+        df.dropna(subset=["chapter"])
+        .sort_values("chapter")
+        .drop_duplicates(subset=["chapter"], keep="first")
+        .reset_index(drop=True)
+    )
+    chapters["chapter_position"] = np.arange(len(chapters))
+
+    print(f"[arcs] examining {len(chapters)} unique chapters from 'chapter' and 'title'")
+    parsed = chapters["title"].fillna("").astype(str).map(_parse_arc_title)
+    chapters[["arc_name", "part", "suffix_style"]] = pd.DataFrame(
+        parsed.tolist(), index=chapters.index,
+    )
+    style_counts = chapters["suffix_style"].value_counts().to_dict()
+    print(
+        "[arcs] recognized numbered suffixes: "
+        f"roman={style_counts.get('roman', 0)}, "
+        f"arabic={style_counts.get('arabic', 0)}, "
+        f"word={style_counts.get('word', 0)}"
+    )
+
+    arcs = []
+    used_numbered_positions = set()
+    position = 0
+    while position < len(chapters) - 1:
+        first = chapters.iloc[position]
+        second = chapters.iloc[position + 1]
+        consecutive = _chapters_are_consecutive(first["chapter"], second["chapter"])
+
+        explicit_first = pd.notna(first["part"]) and int(first["part"]) == 1
+        implicit_first = pd.isna(first["part"])
+        second_is_two = pd.notna(second["part"]) and int(second["part"]) == 2
+        if explicit_first:
+            run_positions = [position]
+            current_part = 1
+            next_position = position + 1
+        elif implicit_first and consecutive and second_is_two:
+            run_positions = [position, position + 1]
+            current_part = 2
+            next_position = position + 2
+            print(
+                f"[arcs] inferred unlabeled chapter {first['chapter']} as part 1 "
+                f"before explicit part 2"
+            )
+        else:
+            position += 1
+            continue
+
+        while next_position < len(chapters):
+            unlabeled_positions = []
+            scan_position = next_position
+
+            # Collect at most two consecutive unlabeled chapters before the
+            # next explicit part label.
+            while scan_position < len(chapters) and len(unlabeled_positions) < 2:
+                previous_row = chapters.iloc[scan_position - 1]
+                scan_row = chapters.iloc[scan_position]
+                if not _chapters_are_consecutive(previous_row["chapter"], scan_row["chapter"]):
+                    break
+                if pd.notna(scan_row["part"]):
+                    break
+                unlabeled_positions.append(scan_position)
+                scan_position += 1
+
+            if scan_position >= len(chapters):
+                break
+
+            next_row = chapters.iloc[scan_position]
+            if pd.isna(next_row["part"]):
+                # More than two consecutive unlabeled chapters.
+                break
+
+            next_part = int(next_row["part"])
+            previous_numbered_row = chapters.iloc[run_positions[-1]]
+            chapter_span = float(next_row["chapter"]) - float(previous_numbered_row["chapter"])
+            part_span = next_part - current_part
+            if not np.isclose(chapter_span, part_span):
+                print(
+                    f"[arcs] stopped before chapter {next_row['chapter']}: "
+                    f"chapter span {chapter_span:g} does not match part span {part_span}"
+                )
+                break
+
+            missing_parts = next_part - current_part - 1
+            unlabeled_count = len(unlabeled_positions)
+            if unlabeled_count == 0:
+                if missing_parts != 0:
+                    break
+            elif not (unlabeled_count <= missing_parts <= 2 * unlabeled_count):
+                break
+
+            if unlabeled_positions:
+                part_cursor = current_part + 1
+                extra_combined_parts = missing_parts - unlabeled_count
+                for unlabeled_position in unlabeled_positions:
+                    covered_parts = 1 + int(extra_combined_parts > 0)
+                    extra_combined_parts -= covered_parts - 1
+                    part_end = part_cursor + covered_parts - 1
+                    part_label = (
+                        str(part_cursor) if part_cursor == part_end
+                        else f"{part_cursor}–{part_end}"
+                    )
+                    print(
+                        f"[arcs] inferred unlabeled chapter "
+                        f"{chapters.iloc[unlabeled_position]['chapter']} as part(s) "
+                        f"{part_label} before explicit part {next_part}"
+                    )
+                    part_cursor = part_end + 1
+
+            run_positions.extend(unlabeled_positions)
+            run_positions.append(scan_position)
+            current_part = next_part
+            next_position = scan_position + 1
+
+        if current_part < 2:
+            position += 1
+            continue
+
+        last_part = current_part
+        last = chapters.iloc[run_positions[-1]]
+        arcs.append({
+            "arc_name": last["arc_name"],
+            "arc_length": last_part,
+            "start_position": int(first["chapter_position"]),
+            "end_position": int(last["chapter_position"]),
+            "start_chapter": first["chapter"],
+        })
+        used_numbered_positions.update(
+            run_position for run_position in run_positions
+            if pd.notna(chapters.iloc[run_position]["part"])
+        )
+        print(
+            f"[arcs] run {first['chapter']}–{last['chapter']}: "
+            f"parts 1–{last_part}; using final name {last['arc_name']!r}"
+        )
+        position = next_position
+
+    numbered_positions = set(chapters.index[chapters["part"].notna()].tolist())
+    orphaned_positions = sorted(numbered_positions.difference(used_numbered_positions))
+    if orphaned_positions:
+        examples = ", ".join(
+            f"{chapters.iloc[pos]['chapter']}={int(chapters.iloc[pos]['part'])}"
+            for pos in orphaned_positions[:10]
+        )
+        remainder = " ..." if len(orphaned_positions) > 10 else ""
+        print(
+            f"[arcs] ignored {len(orphaned_positions)} numbered titles outside "
+            f"a consecutive 1..N run: {examples}{remainder}"
+        )
+
+    columns = [
+        "arc_index", "arc_name", "arc_length", "gap_chapters",
+        "start_chapter", "start_position", "end_position",
+    ]
+    if not arcs:
+        print("[arcs] no complete arcs detected")
+        return pd.DataFrame(columns=columns)
+
+    result = pd.DataFrame(arcs).sort_values("start_position").reset_index(drop=True)
+    result.insert(0, "arc_index", np.arange(1, len(result) + 1))
+    previous_end = result["end_position"].shift(fill_value=-1)
+    result["gap_chapters"] = (result["start_position"] - previous_end - 1).clip(lower=0).astype(int)
+    for arc in result.itertuples():
+        print(
+            f"[arcs] detected #{arc.arc_index}: {arc.arc_name!r}, "
+            f"length={arc.arc_length}, start_chapter={arc.start_chapter}, "
+            f"preceding_gap={arc.gap_chapters}"
+        )
+    print(f"[arcs] detected {len(result)} complete arcs")
+    return result[columns]
+
+
+def plot_arcs(df: pd.DataFrame, out_path: str, show: bool = False) -> None:
+    """Plot arc length over time, its frequency, and gaps between arcs."""
+    arcs = build_arc_stats(df)
+
+    fig, axes = plt.subplots(3, 1, figsize=(12, 12))
+    if arcs.empty:
+        for ax in axes:
+            ax.axis("off")
+        axes[1].text(0.5, 0.5, "No complete numbered arcs found",
+                     ha="center", va="center", transform=axes[1].transAxes)
+    else:
+        x = arcs["arc_index"].to_numpy()
+
+        axes[0].plot(x, arcs["arc_length"], marker="o", color="steelblue")
+        axes[0].set_ylabel("chapters in arc")
+        axes[0].set_title("Arc length over chronological arc index")
+
+        frequency = arcs["arc_length"].value_counts().sort_index()
+        axes[1].bar(frequency.index, frequency.values, color="seagreen")
+        axes[1].set_xticks(frequency.index)
+        axes[1].set_xlabel("chapters in arc")
+        axes[1].set_ylabel("number of arcs")
+        axes[1].set_title("Arc-length frequency")
+
+        axes[2].bar(x, arcs["gap_chapters"], color="darkorange")
+        axes[2].set_xlabel("chronological arc index")
+        axes[2].set_ylabel("chapters in preceding gap")
+        axes[2].set_title("Chapters before each arc (first bar is before the first arc)")
+
+        for ax in (axes[0], axes[2]):
+            ax.set_xticks(x)
+            ax.grid(axis="y", alpha=0.25)
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=300)
+    if not show:
+        plt.close(fig)
+
+
+def _plot_lateness_categories(ax, df_gap: pd.DataFrame) -> None:
+    """Stacked bar chart: for each discrete days-since-previous-deadline bucket,
+    show the percentage of chapters that fall into three lateness categories
+    (<12h, 12-36h, >36h)."""
+    df_late = df_gap.dropna(subset=["hours_late", "deadline_gap_days"]).copy()
+    # Discrete bucket for the independent variable: rounded days since previous deadline.
+    df_late["gap_bucket"] = df_late["deadline_gap_days"].round().astype(int)
+
+    def categorize(h: float) -> str:
+        if h < 12:
+            return "<12h late"
+        elif h < 36:
+            return "12-36h late"
+        return ">36h late"
+
+    df_late["category"] = df_late["hours_late"].apply(categorize)
+
+    categories = ["<12h late", "12-36h late", ">36h late"]
+    cat_colors = {"<12h late": "seagreen", "12-36h late": "goldenrod", ">36h late": "firebrick"}
+
+    buckets = sorted(df_late["gap_bucket"].unique())
+    pct = {cat: [] for cat in categories}
+    for b in buckets:
+        sub = df_late[df_late["gap_bucket"] == b]
+        total = len(sub)
+        for cat in categories:
+            pct[cat].append(100.0 * (sub["category"] == cat).sum() / total if total else 0.0)
+
+    x = np.arange(len(buckets))
+    bottom = np.zeros(len(buckets))
+    for cat in categories:
+        vals = np.array(pct[cat])
+        ax.bar(x, vals, bottom=bottom, color=cat_colors[cat], label=cat)
+        bottom += vals
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([str(b) for b in buckets])
+    ax.set_xlabel("days since previous deadline")
+    ax.set_ylabel("% of chapters in bucket")
+    ax.set_ylim(0, 100)
+    ax.set_title("lateness category breakdown per days-since-previous-deadline bucket")
+    ax.legend()
+
+
+def _plot_lateness_boxplot(ax, df_gap: pd.DataFrame) -> None:
+    """Box-and-whisker of hours_late grouped by days-since-previous-deadline bucket,
+    with the raw points overlaid so exact values are visible alongside
+    median/quartiles."""
+    df_late = df_gap.dropna(subset=["hours_late", "deadline_gap_days"]).copy()
+    df_late["gap_bucket"] = df_late["deadline_gap_days"].round().astype(int)
+
+    order = sorted(df_late["gap_bucket"].unique())
+    sns.boxplot(data=df_late, x="gap_bucket", y="hours_late", order=order,
+                ax=ax, color="lightsteelblue", showmeans=True,
+                meanprops={"marker": "D", "markerfacecolor": "black", "markeredgecolor": "black"})
+    sns.stripplot(data=df_late, x="gap_bucket", y="hours_late", order=order,
+                  ax=ax, hue="modifier", size=9, alpha=0.5, jitter=0.1)
+
+    ax.axhline(y=12, color="goldenrod", linestyle="--", linewidth=1.0, alpha=0.7)
+    ax.axhline(y=36, color="firebrick", linestyle="--", linewidth=1.0, alpha=0.7)
+    ax.set_xlabel("days since previous deadline")
+    ax.set_ylabel("hours late")
+    ax.set_title("hours late distribution per days-since-previous-deadline bucket (box = median/quartiles, diamond = mean)")
+
+
+def plot_deadline_gap(df: pd.DataFrame, out_path: str, show: bool = False,
+                      max_gap_days: float = 20.0, last_n: int | None = None) -> None:
+    """Scatter of days-between-consecutive-deadlines vs hours_late, with fit,
+    a box-and-whisker of hours_late per days-late bucket,
+    plus a stacked bar chart of lateness-category percentages per days-late bucket.
+
+    Gaps larger than max_gap_days (e.g. hiatuses) are excluded. When last_n is set,
+    only the most recent last_n entries (by deadline) are considered.
+    """
+    df_sorted = (
+        df.dropna(subset=["deadline", "hours_late"])
+        .sort_values("deadline")
+        .copy()
+    )
+    if last_n is not None:
+        df_sorted = df_sorted.tail(last_n)
+    df_sorted["deadline_gap_days"] = (
+        df_sorted["deadline"].diff().dt.total_seconds() / 86400.0
+    )
+    df_gap = df_sorted.dropna(subset=["deadline_gap_days"])
+    if max_gap_days is not None:
+        df_gap = df_gap[df_gap["deadline_gap_days"] <= max_gap_days]
+
+    fig, axes = plt.subplots(2, 1, figsize=(12, 12))
+
+    # sns.scatterplot(data=df_gap, x="deadline_gap_days", y="hours_late",
+    #                 hue="modifier", ax=axes[0])
+    # axes[0].axhline(y=0, color="black", linestyle="--", linewidth=1.0)
+    # axes[0].legend()
+    # axes[0].set_xlabel("days since previous deadline")
+    # axes[0].set_ylabel("hours late")
+    # axes[0].set_title(f"deadline gap vs hours late (last {last_n} chapters)")
+
+    _plot_lateness_boxplot(axes[0], df_gap)
+    _plot_lateness_categories(axes[1], df_gap)
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=300)
+    if not show:
+        plt.close(fig)
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -289,6 +697,9 @@ def main() -> None:
     plot_hours_late(df, df_events, args.out_hours_late, show=args.plot)
     plot_word_count(df, args.out_word_count, day_rolling=args.day_rolling_avg, show=args.plot, exclude_gaps=args.exclude_gaps)
     plot_monthly_bars(df, args.out_monthly_bars, show=args.plot)
+    plot_deadline_gap(df, args.out_deadline_gap, show=args.plot,
+                      max_gap_days=args.deadline_max_gap_days, last_n=args.deadline_last_n)
+    plot_arcs(df, args.out_arcs, show=args.plot)
 
     if args.plot:
         plt.show()
