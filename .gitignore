@@ -2,4 +2,6 @@
 __pycache__
 data/royalroad/cache
 data/patreon/latest.pdf
+/build/
+/plots/
 config.yaml
