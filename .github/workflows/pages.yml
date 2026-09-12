@@ -1,0 +1,93 @@
+name: Build and deploy Patreon report
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "data/**"
+      - "scripts/**"
+      - "config.yaml"
+      - "pyproject.toml"
+      - "poetry.lock"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+  schedule:
+    # Mondays at 06:17 UTC. Pushes to the data files also deploy immediately.
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      MPLBACKEND: Agg
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-ansi
+
+      - name: Generate plots
+        run: |
+          mkdir -p build/images
+
+          poetry run python scripts/plot_patreon.py \
+            --config config.yaml \
+            --out-histograms build/images/patreon_histograms.png \
+            --out-hours-late build/images/patreon_hours_late.png \
+            --out-word-count build/images/patreon_word_count.png \
+            --out-monthly-bars build/images/patreon_monthly_bars.png \
+            --out-deadline-gap build/images/patreon_deadline_gap.png \
+            --out-arcs build/images/patreon_arcs.png
+
+      - name: Generate text summaries
+        run: |
+          poetry run python scripts/summarize_hours_late.py --last-n 10 > build/recent_entries.txt
+          poetry run python scripts/summarize_hours_late.py --summary-n 10 > build/summary_stats.txt
+
+      - name: Build static page
+        run: |
+          poetry run python scripts/build_page.py \
+            --recent-entries build/recent_entries.txt \
+            --summary-stats build/summary_stats.txt \
+            --images build/images \
+            --output build/index.html
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: build
+          retention-days: 1
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
