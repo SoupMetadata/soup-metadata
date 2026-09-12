@@ -213,6 +213,14 @@ def relative_url(path: Path, output_dir: Path) -> str:
     return Path(os.path.relpath(path, output_dir)).as_posix()
 
 
+def chapter_sort_key(row: dict[str, str]) -> tuple[bool, float]:
+    """Sort parsed chapters numerically, with unknown chapters at the end."""
+    chapter = row["chapter"]
+    if re.fullmatch(r"\d+(?:\.\d+)?", chapter):
+        return True, float(chapter)
+    return False, float("-inf")
+
+
 def render_entries(text: str) -> str:
     heading = extract_heading(text, "Recent entries")
     rows, unparsed = parse_entries(text)
@@ -226,8 +234,9 @@ def render_entries(text: str) -> str:
         </section>
         """
 
+    rows.sort(key=chapter_sort_key, reverse=True)
     body = "\n".join(
-        "<tr>"
+        f'<tr data-chapter="{e(row["chapter"])}">'
         f"<td class=\"numeric\"><span class=\"timing {lateness_class(row['hours'])}\">{e(row['hours'])}</span></td>"
         f"<td><span class=\"tag\">{e(row['modifier'])}</span></td>"
         f"<td class=\"numeric\">{e(row['words'])}</td>"
@@ -245,11 +254,14 @@ def render_entries(text: str) -> str:
     <section class="panel" id="recent">
       <div class="section-heading">
         <h2>{e(heading)}</h2>
+        <button class="order-toggle" type="button" data-order-toggle aria-controls="recent-entries-body">
+          Show oldest first
+        </button>
       </div>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Hours late</th><th>Modifier</th><th>Word count</th><th>Chapter</th></tr></thead>
-          <tbody>{body}</tbody>
+          <tbody id="recent-entries-body">{body}</tbody>
         </table>
       </div>
       <div class="timing-legend" aria-label="Hours-late color scale">
@@ -413,12 +425,32 @@ main { padding: 2rem 0 4rem; }
   background: var(--paper);
 }
 .panel { padding: clamp(1.2rem, 3vw, 2rem); }
-.section-heading { margin-bottom: 1.15rem; }
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.15rem;
+}
 .section-heading h2, .plots-heading h2 {
   margin: 0;
   font-size: clamp(1.35rem, 2.5vw, 1.8rem);
   line-height: 1.2;
 }
+.order-toggle {
+  flex: none;
+  border: 1px solid #aebfd8;
+  border-radius: 7px;
+  padding: .42rem .72rem;
+  background: var(--paper);
+  color: var(--blue-dark);
+  font: inherit;
+  font-size: .8rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+.order-toggle:hover { background: #edf3fb; }
+.order-toggle:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
 .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 13px; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 th, td { padding: .72rem .82rem; border-bottom: 1px solid #e9eef5; text-align: left; white-space: nowrap; }
@@ -479,6 +511,7 @@ footer { border-top: 1px solid var(--line); color: var(--muted); background: var
 }
 @media (max-width: 520px) {
   .hero-inner, main, .footer-inner { width: min(100% - 1rem, 1180px); }
+  .section-heading { align-items: flex-start; flex-direction: column; }
   th, td { padding: .62rem .68rem; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
@@ -543,6 +576,19 @@ def build_page(args: argparse.Namespace) -> str:
     </section>
   </main>
   <footer><div class="footer-inner">Generated from the latest chapter data.</div></footer>
+  <script>
+    const orderToggle = document.querySelector("[data-order-toggle]");
+    const entriesBody = document.querySelector("#recent-entries-body");
+    if (orderToggle && entriesBody) {{
+      let newestFirst = true;
+      orderToggle.addEventListener("click", () => {{
+        const rows = Array.from(entriesBody.rows);
+        rows.reverse().forEach((row) => entriesBody.appendChild(row));
+        newestFirst = !newestFirst;
+        orderToggle.textContent = newestFirst ? "Show oldest first" : "Show newest first";
+      }});
+    }}
+  </script>
 </body>
 </html>
 """
