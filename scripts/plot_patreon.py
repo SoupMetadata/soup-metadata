@@ -111,12 +111,57 @@ def plot_histograms(df: pd.DataFrame, out_path: str, show: bool = False) -> None
         plt.close(fig)
 
 
+def _add_hours_late_guides(
+    ax, stripe_width: float = 2.0, guide_interval: float = 24.0,
+) -> None:
+    """Add two-hour bands and dotted day-interval guides to an hours-late axis."""
+    y_min, y_max = ax.get_ylim()
+
+    # Shade every other two-hour interval. Starting each shaded band on a
+    # multiple of four keeps all band edges aligned to exact two-hour marks.
+    stripe_period = stripe_width * 2
+    first_stripe = np.floor(y_min / stripe_period) * stripe_period
+    for band_start in np.arange(first_stripe, y_max, stripe_period):
+        visible_start = max(band_start, y_min)
+        visible_end = min(band_start + stripe_width, y_max)
+        if visible_start < visible_end:
+            ax.axhspan(
+                visible_start,
+                visible_end,
+                color="slategray",
+                alpha=0.08,
+                linewidth=0,
+                zorder=0,
+            )
+
+    # Draw one-day reference lines only where they fall inside the current
+    # view. Zero is handled separately by the stronger dashed baseline.
+    first_guide = np.ceil(y_min / guide_interval) * guide_interval
+    last_guide = np.floor(y_max / guide_interval) * guide_interval
+    for guide_y in np.arange(
+        first_guide, last_guide + guide_interval / 2, guide_interval,
+    ):
+        if not np.isclose(guide_y, 0.0):
+            ax.axhline(
+                y=guide_y,
+                color="dimgray",
+                linestyle=":",
+                linewidth=1.0,
+                alpha=0.75,
+                zorder=0.5,
+            )
+
+    # Background artists should not change the limits chosen for the data.
+    ax.set_ylim(y_min, y_max)
+
+
 def plot_hours_late(df: pd.DataFrame, df_events: pd.DataFrame, out_path: str, show: bool = False) -> None:
     """Scatter plot of hours_late by chapter, with event annotations."""
     colors = ["red", "blue", "purple", "orange", "black"]
 
     fig, ax = plt.subplots(figsize=(12, 6))
     sns.scatterplot(data=df, x="chapter", y="hours_late", hue="modifier", ax=ax)
+    _add_hours_late_guides(ax)
     ax.axhline(y=0, color="black", linestyle="--", linewidth=1.0)
 
     for i, row in enumerate(df_events.itertuples()):
@@ -620,7 +665,7 @@ def _plot_lateness_categories(ax, df_gap: pd.DataFrame) -> None:
     ax.legend()
 
 
-def _plot_lateness_boxplot(ax, df_gap: pd.DataFrame) -> None:
+def _plot_lateness_boxplot(ax, df_gap: pd.DataFrame, last_n: int) -> None:
     """Box-and-whisker of hours_late grouped by days-since-previous-deadline bucket,
     with the raw points overlaid so exact values are visible alongside
     median/quartiles."""
@@ -638,7 +683,7 @@ def _plot_lateness_boxplot(ax, df_gap: pd.DataFrame) -> None:
     ax.axhline(y=36, color="firebrick", linestyle="--", linewidth=1.0, alpha=0.7)
     ax.set_xlabel("days since previous deadline")
     ax.set_ylabel("hours late")
-    ax.set_title("hours late distribution per days-since-previous-deadline bucket (box = median/quartiles, diamond = mean)")
+    ax.set_title(f"hours late distribution per days-since-previous-deadline bucket (boxplot, diamond = mean) (past {last_n} chapters)")
 
 
 def plot_deadline_gap(df: pd.DataFrame, out_path: str, show: bool = False,
@@ -674,7 +719,7 @@ def plot_deadline_gap(df: pd.DataFrame, out_path: str, show: bool = False,
     # axes[0].set_ylabel("hours late")
     # axes[0].set_title(f"deadline gap vs hours late (last {last_n} chapters)")
 
-    _plot_lateness_boxplot(axes[0], df_gap)
+    _plot_lateness_boxplot(axes[0], df_gap, last_n)
     _plot_lateness_categories(axes[1], df_gap)
 
     fig.tight_layout()

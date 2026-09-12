@@ -30,7 +30,7 @@ from chaplib import data
 # ---------------------------------------------------------------------------
 
 PAGE_NUM_START = 5
-SPLIT_X = 140       # x position of vertical column divider
+SPLIT_X = 135       # x position of vertical column divider
 LINE_TOL = 2        # tolerance (pts) for grouping words into the same row
 GAP_THRESHOLD = 15  # vertical gap (pts) that signals a new entry
 
@@ -333,6 +333,7 @@ def entries_to_chapter_data(entries: list[dict[str, str]], debug: bool = False) 
     start = False
     try_next = False
     prev_date = None
+    prev_error = None
 
     for i, entry in enumerate(entries, 1):
         if entry["left"] == "Early 2040 CE":
@@ -360,7 +361,8 @@ def entries_to_chapter_data(entries: list[dict[str, str]], debug: bool = False) 
 
             if try_next:
                 # could be triggered by unrelated exception
-                assert date_cls == "empty"
+                if date_cls != "empty":
+                    raise prev_error
                 append_entry_to_chapter_data(chapter_data, prev_date, chap_ranges)
                 try_next = False
             else:
@@ -370,6 +372,7 @@ def entries_to_chapter_data(entries: list[dict[str, str]], debug: bool = False) 
             if try_next:
                 raise
             try_next = True
+            prev_error = e
             prev_date = (date_cls, date)
 
     return chapter_data
