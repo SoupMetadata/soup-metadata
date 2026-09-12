@@ -6,7 +6,7 @@ on:
     paths:
       - "data/**"
       - "scripts/**"
-      - "config.yaml"
+      - "example_config.yaml"
       - "pyproject.toml"
       - "poetry.lock"
       - ".github/workflows/pages.yml"
@@ -44,6 +44,9 @@ jobs:
 
       - name: Install dependencies
         run: poetry install --no-interaction --no-ansi
+
+      - name: Prepare configuration
+        run: cp example_config.yaml config.yaml
 
       - name: Generate plots
         run: |

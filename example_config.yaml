@@ -12,7 +12,7 @@ path:
     latest_pdf: data/patreon/latest.pdf
     csv: data/patreon/timeline.csv
   intermediary:
-    path: data/temp/intermediary.csv
+    data/temp/intermediary.csv
 
 fetch:
   patreon:
@@ -29,18 +29,20 @@ fetch:
 
 plot:
   timeline:
-    window: 10
-    pacing_window: 10
+    window: 20
+    pacing_window: 30
     output: plots/timeline.png
   patreon:
+    out_arcs: plots/arcs.png
     out_histograms: plots/histograms.png
     out_hours_late: plots/hours_late.png
     out_word_count: plots/word_count.png
     out_monthly_bars: plots/monthly_bars.png
-    day_rolling_avg: 26
+    day_rolling_avg: 30
     exclude_gaps: false
+    out_deadline_gap: plots/deadline_gap.png
+    deadline_max_gap_days: 20
+    deadline_last_n: 20
   royalroad:
     out: plots/rr_word_count.png
     day_rolling_avg: 26
-
-
