@@ -201,6 +201,29 @@ GAPS = [
 ]
 
 
+def _add_word_avg_stripes(ax, stripe_width: float = 200.0) -> None:
+    """Add alternating horizontal bands to a words/day axis."""
+    y_min, y_max = ax.get_ylim()
+    stripe_period = stripe_width * 2
+    first_stripe = np.floor(y_min / stripe_period) * stripe_period
+
+    for band_start in np.arange(first_stripe, y_max, stripe_period):
+        visible_start = max(band_start, y_min)
+        visible_end = min(band_start + stripe_width, y_max)
+        if visible_start < visible_end:
+            ax.axhspan(
+                visible_start,
+                visible_end,
+                color="slategray",
+                alpha=0.08,
+                linewidth=0,
+                zorder=0,
+            )
+
+    # Background artists should not change the limits chosen for the data.
+    ax.set_ylim(y_min, y_max)
+
+
 def _plot_word_avg(ax, df_wc: pd.DataFrame, day_rolling: int, exclude_gaps: bool = False) -> None:
     """Upper subplot: rolling words/day average over time with poly + linear fits.
 
@@ -233,6 +256,7 @@ def _plot_word_avg(ax, df_wc: pd.DataFrame, day_rolling: int, exclude_gaps: bool
     ax.plot(x_num, y_lin, color="orange", linewidth=2, linestyle="--",
             label=f"linear fit  $R^2={r2_lin:.3f}$")
     ax.set_ylabel(f"words/day ({day_rolling}D rolling avg)")
+    _add_word_avg_stripes(ax, stripe_width=200.0)
 
     # If gaps are excluded, mark jump boundaries with vertical dotted lines.
     if exclude_gaps:
