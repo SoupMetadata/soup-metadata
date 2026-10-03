@@ -78,6 +78,13 @@ PLOTS = (
             "and chapters between successive arcs."
         ),
     ),
+    Plot(
+        filename="patreon_timeline.png",
+        title="Timeline",
+        summary=(
+            "A comparison of the time passing in-story vs. the time passing IRL. A debatable measure of a dimension of the story's pacing."
+        ),
+    ),
 )
 
 

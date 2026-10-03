@@ -61,6 +61,10 @@ jobs:
             --out-deadline-gap build/images/patreon_deadline_gap.png \
             --out-arcs build/images/patreon_arcs.png
 
+          poetry run python scripts/plot_timeline.py \
+            --config config.yaml \
+            --output build/images/patreon_timeline.png
+
       - name: Generate text summaries
         run: |
           poetry run python scripts/summarize_hours_late.py --last-n 10 > build/recent_entries.txt
