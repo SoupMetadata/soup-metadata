@@ -71,6 +71,16 @@ PLOTS = (
         ),
     ),
     Plot(
+        filename="patreon_chapter_gap.png",
+        title="Time between chapters",
+        summary=(
+            "Days since the previous chapter, by chapter number: actual gaps from "
+            "publish times and predicted gaps from deadlines, including the next "
+            "upcoming deadline. Solid lines are rolling medians; the dashed line is "
+            "a linear fit showing how the gap grows over time."
+        ),
+    ),
+    Plot(
         filename="patreon_arcs.png",
         title="Story arcs",
         summary=(

@@ -59,7 +59,8 @@ jobs:
             --out-word-count build/images/patreon_word_count.png \
             --out-monthly-bars build/images/patreon_monthly_bars.png \
             --out-deadline-gap build/images/patreon_deadline_gap.png \
-            --out-arcs build/images/patreon_arcs.png
+            --out-arcs build/images/patreon_arcs.png \
+            --out-chapter-gap build/images/patreon_chapter_gap.png
 
           poetry run python scripts/plot_timeline.py \
             --config config.yaml \

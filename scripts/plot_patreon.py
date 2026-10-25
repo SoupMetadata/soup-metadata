@@ -39,6 +39,10 @@ def parse_args():
         default_out_arcs = None
     parser.add_argument("--out-arcs", default=default_out_arcs or "patreon_arcs.png",
                         help="Output path for the arc length/frequency/gap plot.")
+    parser.add_argument("--out-chapter-gap", default=cfg.get("plot.patreon.out_chapter_gap", None) or "patreon_chapter_gap.png",
+                        help="Output path for the time-between-chapters plot.")
+    parser.add_argument("--gap-rolling-window", default=cfg.get("plot.patreon.gap_rolling_window", 10), type=int,
+                        help="Window size in chapters for the time-between-chapters rolling median.")
     parser.add_argument("--deadline-max-gap-days", default=cfg.get("plot.patreon.deadline_max_gap_days"), type=float,
                         help="Exclude deadline gaps larger than this many days (hiatuses).")
     parser.add_argument("--deadline-last-n", default=cfg.get("plot.patreon.deadline_last_n"), type=int,
@@ -752,6 +756,94 @@ def plot_deadline_gap(df: pd.DataFrame, out_path: str, show: bool = False,
         plt.close(fig)
 
 
+def build_chapter_gaps(df: pd.DataFrame) -> pd.DataFrame:
+    """Days since the previous chapter, by chapter number.
+
+    ``actual_gap_days`` compares consecutive ``published`` timestamps and
+    ``predicted_gap_days`` compares consecutive ``deadline`` timestamps. The
+    trailing row with a deadline but no chapter is the upcoming deadline, so it
+    is treated as the next chapter (with a predicted gap only).
+    """
+    chapters = (
+        df.dropna(subset=["chapter"])
+        .sort_values("chapter")
+        .drop_duplicates(subset=["chapter"], keep="first")
+    )
+    upcoming = df[df["chapter"].isna() & df["published"].isna() & df["deadline"].notna()]
+    if not upcoming.empty and upcoming["deadline"].max() > chapters["deadline"].max():
+        upcoming = upcoming.loc[[upcoming["deadline"].idxmax()]].assign(
+            chapter=chapters["chapter"].max() + 1,
+        )
+        chapters = pd.concat([chapters, upcoming])
+
+    gaps = chapters[["chapter", "published", "deadline"]].reset_index(drop=True)
+    gaps["actual_gap_days"] = gaps["published"].diff().dt.total_seconds() / 86400.0
+    gaps["predicted_gap_days"] = gaps["deadline"].diff().dt.total_seconds() / 86400.0
+    return gaps
+
+
+def plot_chapter_gap(df: pd.DataFrame, out_path: str, show: bool = False,
+                     rolling_window: int = 10, max_days: float | None = 14.0) -> None:
+    """Days between chapters (actual and predicted) over chapter count,
+    with rolling medians and a linear fit on the actual gaps.
+
+    Gaps above max_days (hiatuses) are still fitted but drawn clipped at the top.
+    """
+    gaps = build_chapter_gaps(df)
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    series = [
+        ("actual_gap_days", "actual (published)", "steelblue", "o"),
+        ("predicted_gap_days", "predicted (deadline)", "darkorange", "x"),
+    ]
+    for column, label, color, marker in series:
+        points = gaps.dropna(subset=[column])
+        ax.scatter(points["chapter"], points[column], color=color, marker=marker,
+                   s=18, alpha=0.5, label=label)
+        # Median rather than mean so single hiatus gaps don't drag the trend.
+        ax.plot(points["chapter"], points[column].rolling(rolling_window, min_periods=1).median(),
+                color=color, linewidth=2,
+                label=f"{label}, {rolling_window}-chapter rolling median")
+
+    actual = gaps.dropna(subset=["actual_gap_days"])
+    x = actual["chapter"].to_numpy(dtype=float)
+    coeffs_lin, _, r2_lin = poly_fit_r2(x, actual["actual_gap_days"].to_numpy(), deg=1)
+    x_fit = np.linspace(x.min(), gaps["chapter"].max(), 300)
+    ax.plot(x_fit, np.polyval(coeffs_lin, x_fit), color="red", linewidth=1.5, linestyle="--",
+            label=f"linear fit (actual), {coeffs_lin[0] * 100:+.2f} days/100 chapters  $R^2={r2_lin:.3f}$")
+
+    # Highlight the upcoming deadline, which has no actual gap yet.
+    upcoming = gaps[gaps["published"].isna() & gaps["predicted_gap_days"].notna()]
+    for row in upcoming.itertuples():
+        ax.annotate(f"next deadline: {row.predicted_gap_days:.1f} days",
+                    (row.chapter, row.predicted_gap_days),
+                    xytext=(-60, 40), textcoords="offset points", ha="right",
+                    arrowprops=dict(arrowstyle="->", color="darkorange"))
+
+    # Hiatus gaps would flatten the regular range, so clip them to the top
+    # edge and label their real values.
+    if max_days is not None:
+        clipped = gaps[gaps["actual_gap_days"] > max_days]
+        ax.scatter(clipped["chapter"], np.full(len(clipped), max_days), color="steelblue",
+                   marker="^", s=40, clip_on=False, zorder=5)
+        for row in clipped.itertuples():
+            ax.annotate(f"{row.actual_gap_days:.1f} days (clipped)", (row.chapter, max_days),
+                        xytext=(6, -12), textcoords="offset points", fontsize=8)
+        ax.set_ylim(0, max_days)
+    else:
+        ax.set_ylim(bottom=0)
+    ax.set_xlabel("chapter")
+    ax.set_ylabel("days since previous chapter")
+    ax.set_title("Time between chapters")
+    ax.grid(axis="y", alpha=0.25)
+    ax.legend()
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=300)
+    if not show:
+        plt.close(fig)
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -769,6 +861,8 @@ def main() -> None:
     plot_deadline_gap(df, args.out_deadline_gap, show=args.plot,
                       max_gap_days=args.deadline_max_gap_days, last_n=args.deadline_last_n)
     plot_arcs(df, args.out_arcs, show=args.plot)
+    plot_chapter_gap(df, args.out_chapter_gap, show=args.plot,
+                     rolling_window=args.gap_rolling_window)
 
     if args.plot:
         plt.show()
