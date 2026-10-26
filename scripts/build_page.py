@@ -74,9 +74,9 @@ PLOTS = (
         filename="patreon_chapter_gap.png",
         title="Time between chapters",
         summary=(
-            "Days since the previous chapter, by chapter number: actual gaps from "
-            "publish times and predicted gaps from deadlines, including the next "
-            "upcoming deadline. Solid lines are rolling medians; the dashed line is "
+            "Days since the previous chapter's release, by chapter number: actual "
+            "gaps to the next release and predicted gaps to the next deadline, "
+            "including the upcoming one. Solid lines are rolling medians; the dashed line is "
             "a linear fit showing how the gap grows over time."
         ),
     ),

@@ -759,8 +759,10 @@ def plot_deadline_gap(df: pd.DataFrame, out_path: str, show: bool = False,
 def build_chapter_gaps(df: pd.DataFrame) -> pd.DataFrame:
     """Days since the previous chapter, by chapter number.
 
-    ``actual_gap_days`` compares consecutive ``published`` timestamps and
-    ``predicted_gap_days`` compares consecutive ``deadline`` timestamps. The
+    Both gaps are measured from the previous chapter's ``published`` time:
+    ``actual_gap_days`` to this chapter's ``published`` time and
+    ``predicted_gap_days`` to this chapter's ``deadline``. A late chapter
+    therefore shortens the next predicted gap. The
     trailing row with a deadline but no chapter is the upcoming deadline, so it
     is treated as the next chapter (with a predicted gap only).
     """
@@ -778,7 +780,9 @@ def build_chapter_gaps(df: pd.DataFrame) -> pd.DataFrame:
 
     gaps = chapters[["chapter", "published", "deadline"]].reset_index(drop=True)
     gaps["actual_gap_days"] = gaps["published"].diff().dt.total_seconds() / 86400.0
-    gaps["predicted_gap_days"] = gaps["deadline"].diff().dt.total_seconds() / 86400.0
+    gaps["predicted_gap_days"] = (
+        (gaps["deadline"] - gaps["published"].shift()).dt.total_seconds() / 86400.0
+    )
     return gaps
 
 
@@ -833,7 +837,7 @@ def plot_chapter_gap(df: pd.DataFrame, out_path: str, show: bool = False,
     else:
         ax.set_ylim(bottom=0)
     ax.set_xlabel("chapter")
-    ax.set_ylabel("days since previous chapter")
+    ax.set_ylabel("days since previous chapter's release")
     ax.set_title("Time between chapters")
     ax.grid(axis="y", alpha=0.25)
     ax.legend()
