@@ -5,3 +5,7 @@ data/patreon/latest.pdf
 /build/
 /plots/
 config.yaml
+
+# private game tools
+scripts/guess_release.py
+scripts/discord_guesses.py
